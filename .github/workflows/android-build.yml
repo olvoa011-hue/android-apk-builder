@@ -23,12 +23,15 @@ jobs:
 
       - name: Build Debug APK
         shell: bash
-        run: gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
 
       - name: Vis feil
         if: failure()
         shell: bash
-        run: grep -E "^e: |What went wrong|error:" -A3 build.log | head -40
+        run: |
+          grep -E 'e: |What went wrong|error:' -A3 build.log | head -40
 
       - uses: actions/upload-artifact@v4
         with:
