@@ -478,7 +478,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 sound,
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIC)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
             )
             ch.enableVibration(true)
