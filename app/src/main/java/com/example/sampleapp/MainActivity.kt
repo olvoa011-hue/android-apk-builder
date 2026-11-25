@@ -1,39 +1,45 @@
 package com.example.sampleapp
 
-import android.Manifest
-import android.app.*
-import android.content.*
-import android.content.pm.PackageManager
-import android.content.res.ColorStateList
-import android.graphics.*
+import android.app.Activity
+import android.app.AlertDialog
+import android.app.Dialog
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
-import android.media.AudioAttributes
-import android.media.AudioManager
-import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
-import android.widget.*
-import androidx.core.app.NotificationCompat
-import java.util.Calendar
-import java.util.Locale
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import android.widget.Toast
+import org.json.JSONArray
+import org.json.JSONObject
 
-private val ORANGE = Color.parseColor("#FF9F0A")
+private val BG_TOP = Color.parseColor("#0A0B1E")
+private val BG_BOTTOM = Color.parseColor("#2B0E3A")
+private val ACCENT = Color.parseColor("#FF6482")
+private val LINK = Color.parseColor("#64D2FF")
 private val GRAY = Color.argb(190, 235, 235, 245)
-private val GREEN = Color.parseColor("#34C759")
-private val TRACK_OFF = Color.argb(90, 120, 120, 128)
 
 fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-fun fmt(h: Int, m: Int): String = String.format(Locale.US, "%02d:%02d", h, m)
-
-/** Liquid glass: gjennomsiktig flate med lysende kant (rim light) */
+/** Liquid glass: gjennomsiktig flate med lysende kant */
 fun Context.glass(
     r: Int,
     fillTop: Int = Color.argb(56, 255, 255, 255),
@@ -61,16 +67,12 @@ fun Context.glass(
     return layers
 }
 
-/** Fargerik bakgrunn med uskarpe lysflekker som glasset ligger oppå */
+/** Mørk bakgrunn med uskarpe fargeflekker som glasset ligger oppå */
 fun Context.backdrop(): FrameLayout {
     val f = FrameLayout(this)
     f.background = GradientDrawable(
         GradientDrawable.Orientation.TL_BR,
-        intArrayOf(
-            Color.parseColor("#0A0B1E"),
-            Color.parseColor("#1A1040"),
-            Color.parseColor("#2B0E3A")
-        )
+        intArrayOf(BG_TOP, Color.parseColor("#1A1040"), BG_BOTTOM)
     )
 
     fun blob(color: Int, size: Int, gravity: Int, l: Int, t: Int, r: Int, b: Int) {
@@ -93,201 +95,169 @@ fun Context.backdrop(): FrameLayout {
         f.addView(v, lp)
     }
 
-    blob(Color.parseColor("#FF9F0A"), 260, Gravity.TOP or Gravity.END, 0, -60, -90, 0)
+    blob(Color.parseColor("#FF375F"), 260, Gravity.TOP or Gravity.END, 0, -60, -90, 0)
     blob(Color.parseColor("#BF5AF2"), 300, Gravity.CENTER_VERTICAL or Gravity.START, -120, 0, 0, 0)
     blob(Color.parseColor("#0A84FF"), 280, Gravity.BOTTOM or Gravity.END, 0, 0, -100, -70)
-    blob(Color.parseColor("#FF375F"), 200, Gravity.BOTTOM or Gravity.START, -40, 0, 0, -50)
+    blob(Color.parseColor("#FF9F0A"), 200, Gravity.BOTTOM or Gravity.START, -40, 0, 0, -50)
     return f
 }
 
-data class Alarm(val id: Int, var hour: Int, var minute: Int, var enabled: Boolean)
+class Wish(
+    val id: Long,
+    var title: String,
+    var url: String,
+    var price: String,
+    var note: String,
+    var done: Boolean
+)
+
+class WishList(
+    val id: Long,
+    var name: String,
+    var emoji: String,
+    val wishes: MutableList<Wish>
+)
 
 object Store {
-    private fun prefs(c: Context) = c.getSharedPreferences("alarms", Context.MODE_PRIVATE)
+    private fun prefs(c: Context) = c.getSharedPreferences("onsk", Context.MODE_PRIVATE)
 
-    fun load(c: Context): MutableList<Alarm> {
-        val s = prefs(c).getString("list", "") ?: ""
-        return s.split(";").filter { it.isNotBlank() }.mapNotNull {
-            val p = it.split(",")
-            if (p.size == 4) Alarm(p[0].toInt(), p[1].toInt(), p[2].toInt(), p[3] == "1") else null
-        }.toMutableList()
-    }
-
-    fun save(c: Context, list: List<Alarm>) {
-        val s = list.joinToString(";") {
-            "${it.id},${it.hour},${it.minute},${if (it.enabled) 1 else 0}"
+    fun load(c: Context): MutableList<WishList> {
+        val out = mutableListOf<WishList>()
+        try {
+            val arr = JSONArray(prefs(c).getString("lists", "[]"))
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val ws = mutableListOf<Wish>()
+                val wa = o.getJSONArray("wishes")
+                for (j in 0 until wa.length()) {
+                    val w = wa.getJSONObject(j)
+                    ws.add(
+                        Wish(
+                            w.getLong("id"),
+                            w.optString("title"),
+                            w.optString("url"),
+                            w.optString("price"),
+                            w.optString("note"),
+                            w.optBoolean("done")
+                        )
+                    )
+                }
+                out.add(WishList(o.getLong("id"), o.optString("name"), o.optString("emoji", "🎁"), ws))
+            }
+        } catch (e: Exception) {
+            // tom eller ødelagt lagring: start på nytt
         }
-        prefs(c).edit().putString("list", s).apply()
+        return out
     }
-}
 
-object Scheduler {
-    private fun pi(c: Context, id: Int): PendingIntent =
-        PendingIntent.getBroadcast(
-            c, id,
-            Intent(c, AlarmReceiver::class.java).putExtra("id", id),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-    fun nextTrigger(h: Int, m: Int): Long {
-        val cal = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, h)
-            set(Calendar.MINUTE, m)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
+    fun save(c: Context, lists: List<WishList>) {
+        val arr = JSONArray()
+        for (l in lists) {
+            val o = JSONObject()
+            o.put("id", l.id)
+            o.put("name", l.name)
+            o.put("emoji", l.emoji)
+            val wa = JSONArray()
+            for (w in l.wishes) {
+                val j = JSONObject()
+                j.put("id", w.id)
+                j.put("title", w.title)
+                j.put("url", w.url)
+                j.put("price", w.price)
+                j.put("note", w.note)
+                j.put("done", w.done)
+                wa.put(j)
+            }
+            o.put("wishes", wa)
+            arr.put(o)
         }
-        if (cal.timeInMillis <= System.currentTimeMillis()) cal.add(Calendar.DAY_OF_YEAR, 1)
-        return cal.timeInMillis
-    }
-
-    fun scheduleAt(c: Context, id: Int, at: Long) {
-        val am = c.getSystemService(AlarmManager::class.java)
-        val show = PendingIntent.getActivity(
-            c, 0, Intent(c, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
-        )
-        am.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), pi(c, id))
-    }
-
-    fun cancel(c: Context, id: Int) {
-        c.getSystemService(AlarmManager::class.java).cancel(pi(c, id))
+        prefs(c).edit().putString("lists", arr.toString()).apply()
     }
 }
 
 class MainActivity : Activity() {
 
-    private lateinit var list: LinearLayout
-    private lateinit var empty: TextView
+    private var lists: MutableList<WishList> = mutableListOf()
+    private lateinit var screen: FrameLayout
+    private var openId: Long = -1L
+    private val emojis = listOf("🎂", "🎄", "💍", "🎁", "🏠", "✨")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.parseColor("#0A0B1E")
-        window.navigationBarColor = Color.parseColor("#2B0E3A")
+        window.statusBarColor = BG_TOP
+        window.navigationBarColor = BG_BOTTOM
 
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        }
-
+        lists = Store.load(this)
         val root = backdrop()
-
-        val scroll = ScrollView(this)
-        scroll.isVerticalScrollBarEnabled = false
-
-        val col = LinearLayout(this)
-        col.orientation = LinearLayout.VERTICAL
-        col.setPadding(dp(20), dp(24), dp(20), dp(80))
-
-        val header = LinearLayout(this)
-        header.orientation = LinearLayout.HORIZONTAL
-        header.gravity = Gravity.CENTER_VERTICAL
-
-        val title = TextView(this)
-        title.text = "Alarmer"
-        title.setTextColor(Color.WHITE)
-        title.textSize = 34f
-        title.typeface = Typeface.create("sans-serif", Typeface.BOLD)
-        header.addView(title, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-
-        val add = TextView(this)
-        add.text = "+"
-        add.textSize = 28f
-        add.setTextColor(ORANGE)
-        add.gravity = Gravity.CENTER
-        add.background = glass(22)
-        add.setOnClickListener { pickTime(null) }
-        header.addView(add, LinearLayout.LayoutParams(dp(44), dp(44)))
-        col.addView(header)
-
-        list = LinearLayout(this)
-        list.orientation = LinearLayout.VERTICAL
-        col.addView(list)
-
-        empty = TextView(this)
-        empty.text = "Ingen alarmer.\nTrykk + for å legge til.\n\nTrykk på en alarm for å endre den, hold inne for å slette."
-        empty.setTextColor(GRAY)
-        empty.textSize = 15f
-        empty.gravity = Gravity.CENTER
-        empty.setPadding(0, dp(60), 0, 0)
-        col.addView(empty)
-
-        scroll.addView(col)
-        root.addView(scroll)
+        screen = FrameLayout(this)
+        root.addView(screen, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         setContentView(root)
-    }
-
-    override fun onResume() {
-        super.onResume()
         render()
     }
 
-    private fun render() {
-        list.removeAllViews()
-        val alarms = Store.load(this).sortedBy { it.hour * 60 + it.minute }
-        empty.visibility = if (alarms.isEmpty()) View.VISIBLE else View.GONE
-        for (a in alarms) {
-            val lp = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-            lp.topMargin = dp(12)
-            list.addView(card(a), lp)
-        }
-    }
-
-    private fun card(a: Alarm): View {
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.background = glass(28)
-        row.setPadding(dp(22), dp(14), dp(22), dp(14))
-        row.setOnClickListener { pickTime(a) }
-        row.setOnLongClickListener {
-            confirmDelete(a)
-            true
-        }
-
-        val left = LinearLayout(this)
-        left.orientation = LinearLayout.VERTICAL
-
-        val time = TextView(this)
-        time.text = fmt(a.hour, a.minute)
-        time.textSize = 52f
-        time.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-        time.setTextColor(if (a.enabled) Color.WHITE else GRAY)
-        left.addView(time)
-
-        val label = TextView(this)
-        label.text = "Alarm"
-        label.textSize = 14f
-        label.setTextColor(GRAY)
-        left.addView(label)
-
-        row.addView(left, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-
-        val sw = Switch(this)
-        sw.isChecked = a.enabled
-        sw.trackTintList = ColorStateList(
-            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-            intArrayOf(GREEN, TRACK_OFF)
-        )
-        sw.thumbTintList = ColorStateList.valueOf(Color.WHITE)
-        sw.setOnCheckedChangeListener { _, on ->
-            toggle(a.id, on)
-            list.post { render() }
-        }
-        row.addView(sw)
-        return row
-    }
-
-    private fun toggle(id: Int, on: Boolean) {
-        val all = Store.load(this)
-        val a = all.firstOrNull { it.id == id } ?: return
-        a.enabled = on
-        Store.save(this, all)
-        if (on) {
-            Scheduler.scheduleAt(this, id, Scheduler.nextTrigger(a.hour, a.minute))
-            Toast.makeText(this, untilText(a.hour, a.minute), Toast.LENGTH_SHORT).show()
+    override fun onBackPressed() {
+        if (openId != -1L) {
+            openId = -1L
+            render()
         } else {
-            Scheduler.cancel(this, id)
+            super.onBackPressed()
         }
+    }
+
+    private fun persist() {
+        Store.save(this, lists)
+    }
+
+    private fun render() {
+        screen.removeAllViews()
+        val cur = lists.firstOrNull { it.id == openId }
+        if (cur == null) {
+            openId = -1L
+            screen.addView(homeView(), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        } else {
+            screen.addView(listView(cur), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        }
+    }
+
+    // ---------- små hjelpere ----------
+
+    private fun text(s: String, size: Float, color: Int): TextView {
+        val t = TextView(this)
+        t.text = s
+        t.textSize = size
+        t.setTextColor(color)
+        return t
+    }
+
+    private fun column(): LinearLayout {
+        val c = LinearLayout(this)
+        c.orientation = LinearLayout.VERTICAL
+        c.setPadding(dp(20), dp(24), dp(20), dp(80))
+        return c
+    }
+
+    private fun scrollOf(col: LinearLayout): ScrollView {
+        val s = ScrollView(this)
+        s.isVerticalScrollBarEnabled = false
+        s.addView(col)
+        return s
+    }
+
+    private fun headerRow(): LinearLayout {
+        val h = LinearLayout(this)
+        h.orientation = LinearLayout.HORIZONTAL
+        h.gravity = Gravity.CENTER_VERTICAL
+        return h
+    }
+
+    private fun addBtn(row: LinearLayout, label: String, onClick: () -> Unit) {
+        val b = text(label, 24f, ACCENT)
+        b.gravity = Gravity.CENTER
+        b.background = glass(22)
+        b.setOnClickListener { onClick() }
+        val p = LinearLayout.LayoutParams(dp(44), dp(44))
+        p.marginStart = dp(8)
+        row.addView(b, p)
     }
 
     private fun blurBehind(d: Dialog) {
@@ -300,50 +270,33 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun pickTime(existing: Alarm?) {
-        val listener = TimePickerDialog.OnTimeSetListener { _, h, m ->
-            val all = Store.load(this)
-            val id: Int
-            if (existing == null) {
-                id = (System.currentTimeMillis() / 1000 % 1000000).toInt() + 1
-                all.add(Alarm(id, h, m, true))
-            } else {
-                id = existing.id
-                val a = all.firstOrNull { it.id == id }
-                if (a != null) {
-                    a.hour = h
-                    a.minute = m
-                    a.enabled = true
-                } else {
-                    all.add(Alarm(id, h, m, true))
-                }
-            }
-            Store.save(this, all)
-            Scheduler.scheduleAt(this, id, Scheduler.nextTrigger(h, m))
-            Toast.makeText(this, untilText(h, m), Toast.LENGTH_SHORT).show()
-            render()
-        }
-        val dlg = TimePickerDialog(
-            this,
-            android.R.style.Theme_DeviceDefault_Dialog_Alert,
-            listener,
-            existing?.hour ?: 7,
-            existing?.minute ?: 0,
-            true
-        )
-        dlg.show()
-        blurBehind(dlg)
-    }
+    private fun form(
+        title: String,
+        hints: List<String>,
+        initial: List<String>,
+        onSave: (List<String>) -> Unit
+    ) {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(20), dp(8), dp(20), 0)
 
-    private fun confirmDelete(a: Alarm) {
+        val fields = hints.mapIndexed { i, h ->
+            val e = EditText(this)
+            e.hint = h
+            e.setText(initial[i])
+            e.setHintTextColor(GRAY)
+            e.setTextColor(Color.WHITE)
+            e.inputType = InputType.TYPE_CLASS_TEXT
+            e.setSingleLine(true)
+            box.addView(e, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            e
+        }
+
         val dlg = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Slett alarm " + fmt(a.hour, a.minute) + "?")
-            .setPositiveButton("Slett") { _, _ ->
-                Scheduler.cancel(this, a.id)
-                val all = Store.load(this)
-                all.removeAll { it.id == a.id }
-                Store.save(this, all)
-                render()
+            .setTitle(title)
+            .setView(box)
+            .setPositiveButton("Lagre") { _, _ ->
+                onSave(fields.map { it.text.toString().trim() })
             }
             .setNegativeButton("Avbryt", null)
             .create()
@@ -351,189 +304,254 @@ class MainActivity : Activity() {
         blurBehind(dlg)
     }
 
-    private fun untilText(h: Int, m: Int): String {
-        val diff = Scheduler.nextTrigger(h, m) - System.currentTimeMillis()
-        val total = (diff + 59999) / 60000
-        return "Alarm om ${total / 60} t ${total % 60} min"
+    private fun confirm(title: String, onYes: () -> Unit) {
+        val dlg = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(title)
+            .setPositiveButton("Slett") { _, _ -> onYes() }
+            .setNegativeButton("Avbryt", null)
+            .create()
+        dlg.show()
+        blurBehind(dlg)
     }
-}
 
-class RingActivity : Activity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window.statusBarColor = Color.parseColor("#0A0B1E")
-        window.navigationBarColor = Color.parseColor("#2B0E3A")
+    // ---------- startside: alle lister ----------
 
-        val id = intent.getIntExtra("id", 0)
-        val a = Store.load(this).firstOrNull { it.id == id }
-        val now = Calendar.getInstance()
-        val timeText = if (a != null) fmt(a.hour, a.minute)
-        else fmt(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE))
+    private fun homeView(): View {
+        val col = column()
 
-        val root = backdrop()
+        val header = headerRow()
+        val title = text("Ønsk", 34f, Color.WHITE)
+        title.typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        header.addView(title, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        addBtn(header, "+") { askNewList() }
+        col.addView(header)
 
-        val content = LinearLayout(this)
-        content.orientation = LinearLayout.VERTICAL
-        content.gravity = Gravity.CENTER
-        content.setPadding(dp(28), dp(28), dp(28), dp(28))
+        col.addView(text("Dine ønskelister", 15f, GRAY))
 
-        val label = TextView(this)
-        label.text = "Alarm"
-        label.setTextColor(ORANGE)
-        label.textSize = 22f
-        label.gravity = Gravity.CENTER
-        content.addView(label)
-
-        val time = TextView(this)
-        time.text = timeText
-        time.setTextColor(Color.WHITE)
-        time.textSize = 86f
-        time.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-        time.gravity = Gravity.CENTER
-        time.setPadding(0, dp(8), 0, dp(60))
-        content.addView(time)
-
-        content.addView(button("Slumre 9 min", glass(32), Color.WHITE) {
-            sendBroadcast(
-                Intent(this, AlarmReceiver::class.java)
-                    .setAction(AlarmReceiver.ACTION_SNOOZE).putExtra("id", id)
+        if (lists.isEmpty()) {
+            val e = text(
+                "Ingen lister ennå.\nTrykk + for å lage din første.\n\nHold inne på en liste for å slette den.",
+                15f,
+                GRAY
             )
-            finish()
-        })
-        content.addView(View(this), LinearLayout.LayoutParams(MATCH_PARENT, dp(14)))
-        content.addView(
-            button(
-                "Stopp",
-                glass(
-                    32,
-                    Color.argb(255, 255, 179, 64),
-                    Color.argb(255, 255, 159, 10)
-                ),
-                Color.BLACK
-            ) {
-                sendBroadcast(
-                    Intent(this, AlarmReceiver::class.java)
-                        .setAction(AlarmReceiver.ACTION_STOP).putExtra("id", id)
-                )
-                finish()
+            e.gravity = Gravity.CENTER
+            e.setPadding(0, dp(60), 0, 0)
+            col.addView(e)
+        }
+
+        for (l in lists) {
+            val lp = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+            lp.topMargin = dp(12)
+            col.addView(listCard(l), lp)
+        }
+        return scrollOf(col)
+    }
+
+    private fun listCard(l: WishList): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.background = glass(28)
+        row.setPadding(dp(20), dp(16), dp(20), dp(16))
+
+        row.addView(text(l.emoji, 32f, Color.WHITE))
+
+        val mid = LinearLayout(this)
+        mid.orientation = LinearLayout.VERTICAL
+        mid.setPadding(dp(16), 0, 0, 0)
+        mid.addView(text(l.name, 20f, Color.WHITE))
+        mid.addView(text("${l.wishes.count { !it.done }} ønsker", 14f, GRAY))
+        row.addView(mid, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+
+        row.addView(text("›", 28f, GRAY))
+
+        row.setOnClickListener {
+            openId = l.id
+            render()
+        }
+        row.setOnLongClickListener {
+            confirm("Slett «${l.name}»?") {
+                lists.remove(l)
+                persist()
+                render()
             }
-        )
-
-        root.addView(content, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        setContentView(root)
+            true
+        }
+        return row
     }
 
-    private fun button(text: String, bg: Drawable, fg: Int, onClick: () -> Unit): TextView {
-        val b = TextView(this)
-        b.text = text
-        b.setTextColor(fg)
-        b.textSize = 20f
-        b.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        b.gravity = Gravity.CENTER
-        b.background = bg
-        b.setPadding(0, dp(20), 0, dp(20))
-        b.setOnClickListener { onClick() }
-        return b
-    }
-}
-
-class AlarmReceiver : BroadcastReceiver() {
-
-    companion object {
-        const val CHANNEL = "alarm_v1"
-        const val NOTIF_ID = 4242
-        const val ACTION_STOP = "com.example.sampleapp.STOP"
-        const val ACTION_SNOOZE = "com.example.sampleapp.SNOOZE"
-    }
-
-    override fun onReceive(ctx: Context, intent: Intent) {
-        val id = intent.getIntExtra("id", 0)
-        val nm = ctx.getSystemService(NotificationManager::class.java)
-        when (intent.action) {
-            ACTION_STOP -> nm.cancel(NOTIF_ID)
-            ACTION_SNOOZE -> {
-                nm.cancel(NOTIF_ID)
-                Scheduler.scheduleAt(ctx, id, System.currentTimeMillis() + 9 * 60 * 1000L)
+    private fun askNewList() {
+        form("Ny ønskeliste", listOf("Navn, f.eks. Bursdag"), listOf("")) { v ->
+            if (v[0].isNotBlank()) {
+                val emoji = emojis[lists.size % emojis.size]
+                lists.add(WishList(System.currentTimeMillis(), v[0], emoji, mutableListOf()))
+                persist()
+                render()
             }
-            else -> ring(ctx, nm, id)
         }
     }
 
-    private fun ring(ctx: Context, nm: NotificationManager, id: Int) {
-        val all = Store.load(ctx)
-        val a = all.firstOrNull { it.id == id }
-        if (a != null) {
-            a.enabled = false
-            Store.save(ctx, all)
+    // ---------- én liste med ønsker ----------
+
+    private fun listView(l: WishList): View {
+        val col = column()
+
+        val header = headerRow()
+        val back = text("‹", 30f, ACCENT)
+        back.gravity = Gravity.CENTER
+        back.background = glass(22)
+        back.setOnClickListener {
+            openId = -1L
+            render()
         }
-        val timeText = if (a != null) fmt(a.hour, a.minute) else "Alarm"
+        header.addView(back, LinearLayout.LayoutParams(dp(44), dp(44)))
 
-        val sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val title = text("${l.emoji} ${l.name}", 24f, Color.WHITE)
+        title.typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        title.setPadding(dp(12), 0, 0, 0)
+        header.addView(title, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
 
-        if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(CHANNEL, "Alarmer", NotificationManager.IMPORTANCE_HIGH)
-            ch.setSound(
-                sound,
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
+        addBtn(header, "↗") { share(l) }
+        addBtn(header, "+") { editWish(l, null) }
+        col.addView(header)
+
+        val open = l.wishes.filter { !it.done }
+        val total = open.sumOf { priceOf(it.price) }
+        var summary = "${open.size} ønsker"
+        if (total > 0) summary += " · sum ${total.toLong()} kr"
+        col.addView(text(summary, 15f, GRAY))
+
+        if (l.wishes.isEmpty()) {
+            val e = text(
+                "Ingen ønsker ennå.\nTrykk + for å legge til.\n\nTrykk på et ønske for å endre det, hold inne for å slette.",
+                15f,
+                GRAY
             )
-            ch.enableVibration(true)
-            ch.vibrationPattern = longArrayOf(0, 600, 400, 600)
-            ch.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            nm.createNotificationChannel(ch)
+            e.gravity = Gravity.CENTER
+            e.setPadding(0, dp(60), 0, 0)
+            col.addView(e)
         }
 
-        val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-
-        val fullScreen = PendingIntent.getActivity(
-            ctx, id + 3_000_000,
-            Intent(ctx, RingActivity::class.java)
-                .putExtra("id", id)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-            flags
-        )
-        val stop = PendingIntent.getBroadcast(
-            ctx, id + 1_000_000,
-            Intent(ctx, AlarmReceiver::class.java).setAction(ACTION_STOP).putExtra("id", id),
-            flags
-        )
-        val snooze = PendingIntent.getBroadcast(
-            ctx, id + 2_000_000,
-            Intent(ctx, AlarmReceiver::class.java).setAction(ACTION_SNOOZE).putExtra("id", id),
-            flags
-        )
-
-        val n = NotificationCompat.Builder(ctx, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("Alarm")
-            .setContentText(timeText)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .setFullScreenIntent(fullScreen, true)
-            .setContentIntent(fullScreen)
-            .addAction(0, "Slumre 9 min", snooze)
-            .addAction(0, "Stopp", stop)
-            .setTimeoutAfter(10 * 60 * 1000L)
-            .setSound(sound, AudioManager.STREAM_ALARM)
-            .setVibrate(longArrayOf(0, 600, 400, 600))
-            .build()
-        n.flags = n.flags or Notification.FLAG_INSISTENT
-        nm.notify(NOTIF_ID, n)
+        for (w in l.wishes) {
+            val lp = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+            lp.topMargin = dp(12)
+            col.addView(wishCard(l, w), lp)
+        }
+        return scrollOf(col)
     }
-}
 
-class BootReceiver : BroadcastReceiver() {
-    override fun onReceive(ctx: Context, intent: Intent) {
-        for (a in Store.load(ctx)) {
-            if (a.enabled) {
-                Scheduler.scheduleAt(ctx, a.id, Scheduler.nextTrigger(a.hour, a.minute))
+    private fun wishCard(l: WishList, w: Wish): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.background = glass(26)
+        row.setPadding(dp(20), dp(14), dp(16), dp(14))
+
+        val mid = LinearLayout(this)
+        mid.orientation = LinearLayout.VERTICAL
+
+        val t = text(w.title, 18f, if (w.done) GRAY else Color.WHITE)
+        t.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        if (w.done) t.paintFlags = t.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+        mid.addView(t)
+
+        if (w.price.isNotBlank()) mid.addView(text(w.price, 16f, ACCENT))
+        if (w.note.isNotBlank()) mid.addView(text(w.note, 14f, GRAY))
+        if (w.url.isNotBlank()) {
+            val link = text("Åpne lenke ›", 14f, LINK)
+            link.setPadding(0, dp(4), 0, dp(4))
+            link.setOnClickListener { openUrl(w.url) }
+            mid.addView(link)
+        }
+        row.addView(mid, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+
+        val tick = text(if (w.done) "✓" else "", 20f, Color.WHITE)
+        tick.gravity = Gravity.CENTER
+        tick.background = if (w.done) {
+            glass(20, Color.argb(255, 52, 199, 89), Color.argb(255, 40, 170, 75))
+        } else {
+            glass(20)
+        }
+        tick.setOnClickListener {
+            w.done = !w.done
+            persist()
+            render()
+        }
+        val tp = LinearLayout.LayoutParams(dp(40), dp(40))
+        tp.marginStart = dp(12)
+        row.addView(tick, tp)
+
+        row.setOnClickListener { editWish(l, w) }
+        row.setOnLongClickListener {
+            confirm("Slett «${w.title}»?") {
+                l.wishes.remove(w)
+                persist()
+                render()
+            }
+            true
+        }
+        return row
+    }
+
+    private fun editWish(l: WishList, w: Wish?) {
+        val initial = if (w == null) {
+            listOf("", "", "", "")
+        } else {
+            listOf(w.title, w.url, w.price, w.note)
+        }
+        form(
+            if (w == null) "Nytt ønske" else "Rediger ønske",
+            listOf("Hva ønsker du deg?", "Lenke (valgfritt)", "Pris (valgfritt)", "Notat (valgfritt)"),
+            initial
+        ) { v ->
+            if (v[0].isNotBlank()) {
+                if (w == null) {
+                    l.wishes.add(Wish(System.currentTimeMillis(), v[0], v[1], v[2], v[3], false))
+                } else {
+                    w.title = v[0]
+                    w.url = v[1]
+                    w.price = v[2]
+                    w.note = v[3]
+                }
+                persist()
+                render()
             }
         }
+    }
+
+    private fun priceOf(s: String): Double {
+        val c = s.replace(",", ".").filter { it.isDigit() || it == '.' }.trim('.')
+        return c.toDoubleOrNull() ?: 0.0
+    }
+
+    private fun openUrl(u: String) {
+        var s = u.trim()
+        if (!s.startsWith("http")) s = "https://" + s
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(s)))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Kunne ikke åpne lenken", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun share(l: WishList) {
+        val open = l.wishes.filter { !it.done }
+        if (open.isEmpty()) {
+            Toast.makeText(this, "Ingen ønsker å dele ennå", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val sb = StringBuilder()
+        sb.append(l.emoji).append(" ").append(l.name).append("\n\n")
+        open.forEachIndexed { i, w ->
+            sb.append("${i + 1}. ${w.title}")
+            if (w.price.isNotBlank()) sb.append(" – ${w.price}")
+            sb.append("\n")
+            if (w.note.isNotBlank()) sb.append("   ${w.note}\n")
+            if (w.url.isNotBlank()) sb.append("   ${w.url}\n")
+        }
+        val send = Intent(Intent.ACTION_SEND)
+        send.type = "text/plain"
+        send.putExtra(Intent.EXTRA_TEXT, sb.toString())
+        startActivity(Intent.createChooser(send, "Del ønskelisten"))
     }
 }
