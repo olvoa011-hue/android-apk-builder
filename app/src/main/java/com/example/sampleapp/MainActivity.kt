@@ -1,29 +1,35 @@
 package com.example.sampleapp
-
-import androidx.appcompat.app.AppCompatActivity
+import android.app.Activity
+import android.app.NotificationManager
+import android.content.Intent
 import android.os.Bundle
-import android.widget.Button
-import android.widget.TextView
+import android.provider.Settings
 import android.widget.Toast
 
-class MainActivity : AppCompatActivity() {
-    private var clickCount = 0
+class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
-        val welcomeText = findViewById<TextView>(R.id.welcomeText)
-        val clickButton = findViewById<Button>(R.id.clickButton)
-        val countText = findViewById<TextView>(R.id.countText)
+        val nm = getSystemService(NotificationManager::class.java)
 
-        clickButton.setOnClickListener {
-            clickCount++
-            countText.text = "Button clicked $clickCount times"
-            
-            if (clickCount % 5 == 0) {
-                Toast.makeText(this, "Wow! You've clicked $clickCount times!", Toast.LENGTH_SHORT).show()
+        if (!nm.isNotificationPolicyAccessGranted) {
+            Toast.makeText(
+                this,
+                "Gi appen tilgang til Ikke forstyrr, og åpne den på nytt",
+                Toast.LENGTH_LONG
+            ).show()
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+        } else {
+            if (nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_ALL) {
+                nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+                Toast.makeText(this, "Ikke forstyrr er på", Toast.LENGTH_SHORT).show()
+            } else {
+                nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+                Toast.makeText(this, "Ikke forstyrr er av", Toast.LENGTH_SHORT).show()
             }
         }
+
+        finish()
     }
 }
