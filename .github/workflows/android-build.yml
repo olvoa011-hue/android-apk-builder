@@ -22,7 +22,13 @@ jobs:
           validate-wrappers: false
 
       - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        shell: bash
+        run: gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
+
+      - name: Vis feil
+        if: failure()
+        shell: bash
+        run: grep -E "^e: |What went wrong|error:" -A3 build.log | head -40
 
       - uses: actions/upload-artifact@v4
         with:
